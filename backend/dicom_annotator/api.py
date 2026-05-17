@@ -82,6 +82,47 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
             "modality_files": modality_files,
         }
 
+    from fastapi.responses import FileResponse
+    from .readers import build_series_manifest
+
+    def _modality_dir(c: CaseEntry, modality: str) -> Path:
+        if c.kind == "aligned":
+            if modality not in c.modalities:
+                raise errors.ApiError(404, "modality_not_found",
+                                      f"case {c.id} has no modality {modality!r}",
+                                      case_id=c.id, modality=modality)
+            source = project.sources[c.source_index]
+            return c.case_dir / source.modalities[modality]
+        # raw_dicom: only "series" modality
+        if modality != "series":
+            raise errors.ApiError(404, "modality_not_found",
+                                  f"raw case {c.id} only exposes 'series'",
+                                  case_id=c.id, modality=modality)
+        return c.case_dir
+
+    @app.get("/images/{case_id}/{modality}/manifest.json")
+    def image_manifest(case_id: str, modality: str):
+        c = find_case(case_id)
+        mod_dir = _modality_dir(c, modality)
+        try:
+            return build_series_manifest(mod_dir, slice_url_prefix=f"/images/{case_id}/{modality}")
+        except GeometryError as e:
+            raise errors.geometry_error(str(e))
+
+    @app.get("/images/{case_id}/{modality}/{slice_idx}.dcm")
+    def image_slice(case_id: str, modality: str, slice_idx: int):
+        c = find_case(case_id)
+        mod_dir = _modality_dir(c, modality)
+        try:
+            geom = affine_from_series(mod_dir)
+        except GeometryError as e:
+            raise errors.geometry_error(str(e))
+        if slice_idx < 0 or slice_idx >= len(geom.slice_files):
+            raise errors.ApiError(404, "slice_out_of_range",
+                                  f"slice {slice_idx} out of range [0,{len(geom.slice_files)})",
+                                  slice_idx=slice_idx)
+        return FileResponse(geom.slice_files[slice_idx], media_type="application/dicom")
+
     @app.get("/api/health")
     def health():
         return {"ok": True, "project_root": str(project_root), "case_count": len(state["index"])}

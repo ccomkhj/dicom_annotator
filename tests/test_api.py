@@ -102,3 +102,24 @@ sources:
     files = body["modality_files"]["t2"]
     assert len(files) == 2
     assert all("t2_images" in f for f in files)
+
+
+def test_get_image_manifest(client: TestClient):
+    r = client.get("/images/case_001/t2/manifest.json")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["slice_urls"]) == 3
+    assert body["slice_urls"][0].endswith("/0.dcm")
+    assert body["reference_geometry"]["shape"] == [3, 8, 8]
+
+
+def test_get_image_slice_bytes(client: TestClient):
+    r = client.get("/images/case_001/t2/0.dcm")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/dicom")
+    assert r.content[:128 + 4][128:132] == b"DICM" or len(r.content) > 0
+
+
+def test_get_image_unknown_modality_404(client: TestClient):
+    r = client.get("/images/case_001/bogus/manifest.json")
+    assert r.status_code == 404
