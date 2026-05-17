@@ -44,11 +44,12 @@ def _discover_aligned(
         present = [mod_key for mod_key, sub in source.modalities.items() if (case_dir / sub).is_dir()]
         if not present:
             continue
-        ann_dir = annotations_root / case_dir.name
+        case_id = "__".join(case_dir.relative_to(root).parts)
+        ann_dir = annotations_root / case_id
         labels_present, annotated = _labels_present(ann_dir)
         entries.append(
             CaseEntry(
-                id=case_dir.name,
+                id=case_id,
                 kind="aligned",
                 modalities=tuple(present),
                 annotated=annotated,
