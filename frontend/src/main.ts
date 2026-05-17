@@ -1,7 +1,6 @@
 import "./ui.css";
 import { getProject, getCases } from "./api";
 import { initCornerstone } from "./cornerstone-init";
-import { loadModalityIntoViewport } from "./viewports";
 
 async function main() {
   const app = document.getElementById("app")!;
@@ -33,15 +32,18 @@ async function main() {
     .join("");
   list.querySelectorAll<HTMLDivElement>(".case-row").forEach((row) => {
     row.addEventListener("click", async () => {
-      list.querySelectorAll(".case-row").forEach((r) => r.classList.remove("active"));
+      list.querySelectorAll(".case-row").forEach(r => r.classList.remove("active"));
       row.classList.add("active");
-      const caseId = row.dataset["id"]!;
-      await loadModalityIntoViewport({
-        caseId,
-        modality: "t2",
-        viewportId: "vp-t2",
-        element: document.getElementById("vp-t2") as HTMLDivElement,
-      });
+      const caseId = row.dataset.id!;
+      // Probe the case for available modalities
+      const detail = await (await fetch(`/api/cases/${caseId}`)).json();
+      const modalitySlots = [
+        { key: "t2",   viewportId: "vp-t2",   element: document.getElementById("vp-t2")   as HTMLDivElement },
+        { key: "adc",  viewportId: "vp-adc",  element: document.getElementById("vp-adc")  as HTMLDivElement },
+        { key: "calc", viewportId: "vp-calc", element: document.getElementById("vp-calc") as HTMLDivElement },
+      ];
+      const present = modalitySlots.filter(m => detail.modalities.includes(m.key));
+      await (await import("./viewports")).loadCaseIntoViewports({ caseId, modalities: present });
     });
   });
 }
