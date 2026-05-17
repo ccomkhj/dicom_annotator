@@ -24,7 +24,7 @@ def build_index(project_root: Path, project: Project) -> list[CaseEntry]:
         if isinstance(source, AlignedSource):
             entries.extend(_discover_aligned(project_root, source, src_idx, annotations_root))
         elif isinstance(source, RawDicomSource):
-            pass  # implemented in Task 2.2
+            entries.extend(_discover_raw_dicom(project_root, source, src_idx, annotations_root))
     return entries
 
 
@@ -54,6 +54,39 @@ def _discover_aligned(
                 annotated=annotated,
                 labels_present=tuple(labels_present),
                 case_dir=case_dir,
+                source_index=source_index,
+            )
+        )
+    return entries
+
+
+def _discover_raw_dicom(
+    project_root: Path,
+    source: RawDicomSource,
+    source_index: int,
+    annotations_root: Path,
+) -> list[CaseEntry]:
+    root = project_root / source.root
+    if not root.exists():
+        return []
+    entries = []
+    for series_dir in sorted(root.glob(source.case_pattern)):
+        if not series_dir.is_dir():
+            continue
+        if not any(series_dir.glob("*.dcm")):
+            continue
+        rel = series_dir.relative_to(root)
+        case_id = "__".join(rel.parts)
+        ann_dir = annotations_root / case_id
+        labels_present, annotated = _labels_present(ann_dir)
+        entries.append(
+            CaseEntry(
+                id=case_id,
+                kind="raw_dicom",
+                modalities=("series",),
+                annotated=annotated,
+                labels_present=labels_present,
+                case_dir=series_dir,
                 source_index=source_index,
             )
         )
