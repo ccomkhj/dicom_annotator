@@ -67,6 +67,26 @@ async function main() {
       (await import("./segmentation")).installDirtyTracker();
       setActive(project.labels[0].id);
 
+      const { attachScrubber, currentSlice } = await import("./scrubber");
+      const { propagateFromPrevious } = await import("./propagate");
+      const scrubberHost = document.querySelector(".viewports")!.parentElement!;
+      const existing = scrubberHost.querySelector(".scrubber-host");
+      if (existing) existing.remove();
+      const host = document.createElement("div");
+      host.className = "scrubber-host";
+      scrubberHost.appendChild(host);
+      attachScrubber({
+        hostEl: host,
+        viewportIds,
+        sliceCount: detail.slice_count,
+      });
+      host.querySelector("#propagate-btn")!.addEventListener("click", () => {
+        const idx = currentSlice(viewportIds[0]);
+        const activeLabelEl = document.querySelector(".case-row.active[data-label-id]") as HTMLElement | null;
+        const activeLabel = Number(activeLabelEl?.dataset.labelId ?? "1");
+        propagateFromPrevious(idx, activeLabel);
+      });
+
       for (const lbl of project.labels) {
         const env = await getMask(caseId, lbl.id);
         if (env) {
