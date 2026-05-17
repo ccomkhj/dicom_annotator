@@ -33,3 +33,4 @@ packages = ["backend/dicom_annotator"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

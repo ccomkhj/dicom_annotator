@@ -1,0 +1,67 @@
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+from .config import AlignedSource, Project, RawDicomSource
+
+
+@dataclass(frozen=True)
+class CaseEntry:
+    id: str
+    kind: Literal["aligned", "raw_dicom"]
+    modalities: list[str]
+    annotated: bool
+    labels_present: list[str]
+    case_dir: Path
+    source_index: int  # which source produced this entry
+
+
+def build_index(project_root: Path, project: Project) -> list[CaseEntry]:
+    """Discover all cases across all configured sources."""
+    entries: list[CaseEntry] = []
+    annotations_root = project_root / "annotations"
+    for src_idx, source in enumerate(project.sources):
+        if isinstance(source, AlignedSource):
+            entries.extend(_discover_aligned(project_root, source, src_idx, annotations_root))
+        elif isinstance(source, RawDicomSource):
+            pass  # implemented in Task 2.2
+    return entries
+
+
+def _discover_aligned(
+    project_root: Path,
+    source: AlignedSource,
+    source_index: int,
+    annotations_root: Path,
+) -> list[CaseEntry]:
+    root = project_root / source.root
+    if not root.exists():
+        return []
+    entries = []
+    for case_dir in sorted(root.glob(source.case_glob)):
+        if not case_dir.is_dir():
+            continue
+        present = [mod_key for mod_key, sub in source.modalities.items() if (case_dir / sub).is_dir()]
+        if not present:
+            continue
+        ann_dir = annotations_root / case_dir.name
+        labels_present, annotated = _labels_present(ann_dir)
+        entries.append(
+            CaseEntry(
+                id=case_dir.name,
+                kind="aligned",
+                modalities=present,
+                annotated=annotated,
+                labels_present=labels_present,
+                case_dir=case_dir,
+                source_index=source_index,
+            )
+        )
+    return entries
+
+
+def _labels_present(ann_dir: Path) -> tuple[list[str], bool]:
+    if not ann_dir.is_dir():
+        return [], False
+    labels = sorted(p.name.removesuffix(".nii.gz") for p in ann_dir.glob("*.nii.gz"))
+    return labels, len(labels) > 0
