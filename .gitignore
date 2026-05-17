@@ -7,3 +7,7 @@ dist/
 .vite/
 *.egg-info/
 .pytest_cache/
+.env
+*.dcm
+*.nii
+*.nii.gz
