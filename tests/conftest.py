@@ -123,3 +123,62 @@ def write_dicom_series(dir_path: Path, slices: int = 4, *, base_z: float = 0.0, 
             series_instance_uid=series_uid,
         )
     return dir_path
+
+
+def write_secondary_capture_slice(
+    path: Path,
+    image: np.ndarray,
+    *,
+    instance_number: int,
+    pixel_spacing: tuple[float, float] = (1.0, 1.0),
+    series_instance_uid: str | None = None,
+) -> Path:
+    """Write a Secondary Capture-style DICOM with no IOP/IPP/SliceThickness.
+
+    Mimics the output of tcia-handler's dicom_mapper, which produces SOP class
+    1.2.840.10008.5.1.4.1.1.7 (Secondary Capture Image Storage) and omits all
+    spatial reference tags.
+    """
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.7"
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    ds = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\0" * 128)
+    ds.PatientName = "Test"
+    ds.PatientID = "TEST"
+    ds.Modality = "OT"
+    ds.StudyInstanceUID = generate_uid()
+    ds.SeriesInstanceUID = series_instance_uid or generate_uid()
+    ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+    ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
+    ds.InstanceNumber = instance_number
+    ds.PixelSpacing = list(pixel_spacing)
+    ds.Rows, ds.Columns = image.shape
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelData = image.astype(np.uint16).tobytes()
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+    ds.save_as(path, write_like_original=False)
+    return path
+
+
+def write_secondary_capture_series(
+    dir_path: Path, slices: int = 4, *, pixel_spacing: tuple[float, float] = (1.0, 1.0)
+) -> Path:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    series_uid = generate_uid()
+    for i in range(slices):
+        write_secondary_capture_slice(
+            dir_path / f"{i:04d}.dcm",
+            image=np.zeros((8, 8), dtype=np.uint16),
+            instance_number=i + 1,
+            pixel_spacing=pixel_spacing,
+            series_instance_uid=series_uid,
+        )
+    return dir_path

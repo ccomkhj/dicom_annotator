@@ -1,0 +1,19 @@
+name: tcia-aligned-v2
+labels:
+  - id: 1
+    name: prostate
+    color: "#4FC3F7"
+  - id: 2
+    name: target1
+    color: "#FF7043"
+sources:
+  - kind: aligned
+    root: /Users/huijokim/personal/tcia-handler/data/aligned_v2
+    case_glob: "class*/case_*"
+    modalities:
+      t2: t2_aligned
+      adc: adc_aligned
+      calc: calc_aligned
+    existing_masks:
+      prostate: mask_prostate
+      target1: mask_target1

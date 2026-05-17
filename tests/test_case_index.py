@@ -70,6 +70,53 @@ def test_index_marks_unannotated_when_no_dir(tmp_path: Path):
     assert entry.labels_present == ()
 
 
+def _nested_aligned_project() -> Project:
+    return Project(
+        name="nested",
+        labels=[Label(id=1, name="prostate", color="#000")],
+        sources=[
+            AlignedSource(
+                kind="aligned",
+                root="data/aligned_v2",
+                case_glob="class*/case_*",
+                modalities={"t2": "t2_aligned", "adc": "adc_aligned", "calc": "calc_aligned"},
+                existing_masks={"prostate": "mask_prostate"},
+            )
+        ],
+    )
+
+
+def test_index_discovers_nested_aligned_cases_with_unique_ids(tmp_path: Path):
+    root = tmp_path / "data" / "aligned_v2"
+    make_aligned_case(root / "class1", "case_0001", ["t2_aligned", "adc_aligned", "calc_aligned"])
+    make_aligned_case(root / "class2", "case_0001", ["t2_aligned"])  # same case name, different class
+    make_aligned_case(root / "class2", "case_0002", ["t2_aligned"])
+    (root / "class1" / "case_0001" / "mask_prostate").mkdir()  # presence of mask subdir does not break discovery
+
+    index = build_index(tmp_path, _nested_aligned_project())
+
+    ids = sorted(c.id for c in index)
+    assert ids == ["class1__case_0001", "class2__case_0001", "class2__case_0002"]
+    by_id = {c.id: c for c in index}
+    assert by_id["class1__case_0001"].kind == "aligned"
+    assert sorted(by_id["class1__case_0001"].modalities) == ["adc", "calc", "t2"]
+    assert by_id["class2__case_0001"].modalities == ("t2",)
+
+
+def test_index_uses_nested_id_for_annotation_lookup(tmp_path: Path):
+    root = tmp_path / "data" / "aligned_v2"
+    make_aligned_case(root / "class1", "case_0001", ["t2_aligned"])
+    ann_dir = tmp_path / "annotations" / "class1__case_0001"
+    ann_dir.mkdir(parents=True)
+    (ann_dir / "prostate.nii.gz").write_bytes(b"")
+
+    index = build_index(tmp_path, _nested_aligned_project())
+
+    entry = next(c for c in index if c.id == "class1__case_0001")
+    assert entry.annotated is True
+    assert entry.labels_present == ("prostate",)
+
+
 def _raw_project() -> Project:
     return Project(
         name="raw",

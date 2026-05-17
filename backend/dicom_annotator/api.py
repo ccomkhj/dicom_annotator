@@ -60,18 +60,22 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         except GeometryError as e:
             raise errors.geometry_error(str(e))
 
+        def _rel(p: Path) -> str:
+            try:
+                return str(p.relative_to(project_root))
+            except ValueError:
+                # source.root may be absolute (outside project_root) — keep the absolute path.
+                return str(p)
+
         if c.kind == "aligned":
             modality_files = {
-                mod: [
-                    str(p.relative_to(project_root))
-                    for p in sorted((c.case_dir / mod_to_subdir[mod]).glob("*.dcm"))
-                ]
+                mod: [_rel(p) for p in sorted((c.case_dir / mod_to_subdir[mod]).glob("*.dcm"))]
                 for mod in c.modalities
                 if (c.case_dir / mod_to_subdir[mod]).is_dir()
             }
         else:
             modality_files = {
-                "series": [str(p.relative_to(project_root)) for p in sorted(c.case_dir.glob("*.dcm"))]
+                "series": [_rel(p) for p in sorted(c.case_dir.glob("*.dcm"))]
             }
 
         return {
