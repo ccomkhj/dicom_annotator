@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -9,9 +9,9 @@ from .config import AlignedSource, Project, RawDicomSource
 class CaseEntry:
     id: str
     kind: Literal["aligned", "raw_dicom"]
-    modalities: list[str]
+    modalities: tuple[str, ...]
     annotated: bool
-    labels_present: list[str]
+    labels_present: tuple[str, ...]
     case_dir: Path
     source_index: int  # which source produced this entry
 
@@ -50,9 +50,9 @@ def _discover_aligned(
             CaseEntry(
                 id=case_dir.name,
                 kind="aligned",
-                modalities=present,
+                modalities=tuple(present),
                 annotated=annotated,
-                labels_present=labels_present,
+                labels_present=tuple(labels_present),
                 case_dir=case_dir,
                 source_index=source_index,
             )
@@ -60,8 +60,8 @@ def _discover_aligned(
     return entries
 
 
-def _labels_present(ann_dir: Path) -> tuple[list[str], bool]:
+def _labels_present(ann_dir: Path) -> tuple[tuple[str, ...], bool]:
     if not ann_dir.is_dir():
-        return [], False
-    labels = sorted(p.name.removesuffix(".nii.gz") for p in ann_dir.glob("*.nii.gz"))
+        return (), False
+    labels = tuple(sorted(p.name.removesuffix(".nii.gz") for p in ann_dir.glob("*.nii.gz")))
     return labels, len(labels) > 0

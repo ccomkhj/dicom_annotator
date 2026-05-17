@@ -2,7 +2,7 @@ from pathlib import Path
 
 from dicom_annotator.case_index import build_index, CaseEntry
 from dicom_annotator.config import Project, AlignedSource, Label
-from tests.conftest import make_aligned_case, make_aligned_existing_mask
+from tests.conftest import make_aligned_case
 
 
 def _aligned_project(root: Path) -> Project:
@@ -56,7 +56,7 @@ def test_index_marks_annotated_when_annotations_exist(tmp_path: Path):
 
     entry = next(c for c in index if c.id == "case_001")
     assert entry.annotated is True
-    assert entry.labels_present == ["prostate"]
+    assert entry.labels_present == ("prostate",)
 
 
 def test_index_marks_unannotated_when_no_dir(tmp_path: Path):
@@ -67,4 +67,4 @@ def test_index_marks_unannotated_when_no_dir(tmp_path: Path):
 
     entry = index[0]
     assert entry.annotated is False
-    assert entry.labels_present == []
+    assert entry.labels_present == ()
