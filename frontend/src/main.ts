@@ -1,6 +1,15 @@
 import "./ui.css";
-import { getProject, getCases } from "./api";
+import { getProject, getCases, getMask } from "./api";
 import { initCornerstone } from "./cornerstone-init";
+
+function showBanner(msg: string) {
+  const app = document.getElementById("app")!;
+  const b = document.createElement("div");
+  b.className = "banner";
+  b.textContent = msg;
+  app.appendChild(b);
+  setTimeout(() => b.remove(), 8000);
+}
 
 async function main() {
   const app = document.getElementById("app")!;
@@ -52,6 +61,15 @@ async function main() {
       await ensureSegmentationVolume(`cornerstoneStreamingImageVolume:${caseId}:t2`);
       await bindSegmentationToToolGroup(viewportIds);
       setActive(project.labels[0].id);
+
+      for (const lbl of project.labels) {
+        const env = await getMask(caseId, lbl.id);
+        if (env) {
+          const { populateFromEnvelope } = await import("./segmentation");
+          await populateFromEnvelope(env, lbl.id);
+          if (env.warnings?.length) showBanner(env.warnings.join(" / "));
+        }
+      }
     });
   });
 
