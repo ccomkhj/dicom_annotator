@@ -1,5 +1,6 @@
 import { volumeLoader, cache as csCache } from "@cornerstonejs/core";
 import * as csTools from "@cornerstonejs/tools";
+import { markDirty } from "./dirty";
 
 export const TOOL_GROUP_ID = "dicom-annotator-tools";
 export const SEG_VOLUME_ID = "dicom-annotator-seg";
@@ -84,4 +85,17 @@ export function extractEnvelope(labelId: number): { shape: [number, number, numb
   let bin = "";
   for (let i = 0; i < out.length; i++) bin += String.fromCharCode(out[i]);
   return { shape: [depth, rows, cols], dtype: "uint8", data: btoa(bin) };
+}
+
+export function installDirtyTracker(): void {
+  const volume = csCache.getVolume(SEG_VOLUME_ID);
+  if (!volume) return;
+  const v = volume as any;
+  if (v.modified && typeof v.modified === "function") {
+    const originalModified = v.modified.bind(v);
+    v.modified = function () {
+      markDirty();
+      return originalModified();
+    };
+  }
 }

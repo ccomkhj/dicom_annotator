@@ -12,11 +12,14 @@ function showBanner(msg: string) {
 }
 
 async function main() {
+  let currentCaseId: string | null = null;
   const app = document.getElementById("app")!;
   app.innerHTML = `
     <div class="topbar">
       <strong>dicom_annotator</strong>
+      <span style="flex:1"></span>
       <span class="dirty-dot" id="dirty"></span>
+      <button class="primary" id="save-btn">Save</button>
     </div>
     <div class="main">
       <div class="case-list" id="case-list">Loading…</div>
@@ -44,6 +47,7 @@ async function main() {
       list.querySelectorAll(".case-row").forEach(r => r.classList.remove("active"));
       row.classList.add("active");
       const caseId = row.dataset.id!;
+      currentCaseId = caseId;
       // Probe the case for available modalities
       const detail = await (await fetch(`/api/cases/${caseId}`)).json();
       const modalitySlots = [
@@ -60,6 +64,7 @@ async function main() {
         await import("./segmentation");
       await ensureSegmentationVolume(`cornerstoneStreamingImageVolume:${caseId}:t2`);
       await bindSegmentationToToolGroup(viewportIds);
+      (await import("./segmentation")).installDirtyTracker();
       setActive(project.labels[0].id);
 
       for (const lbl of project.labels) {
@@ -130,6 +135,26 @@ async function main() {
     createToolGroup(viewportIds);
     (window as any).__toolGroupReady = true;
   };
+
+  // Dirty indicator
+  const { onDirtyChange, isDirty: getDirty, markClean } = await import("./dirty");
+  const dirtyDot = document.getElementById("dirty")!;
+  onDirtyChange(() => dirtyDot.classList.toggle("is-dirty", getDirty()));
+
+  async function saveAll() {
+    if (!currentCaseId) return;
+    const { extractEnvelope } = await import("./segmentation");
+    const { putMask } = await import("./api");
+    for (const lbl of project.labels) {
+      const env = extractEnvelope(lbl.id);
+      await putMask(currentCaseId, lbl.id, env);
+    }
+    markClean();
+  }
+  document.getElementById("save-btn")!.addEventListener("click", saveAll);
+  window.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveAll(); }
+  });
 }
 
 main().catch((err) => {
