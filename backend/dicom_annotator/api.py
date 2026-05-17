@@ -19,6 +19,13 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
                 return c
         raise errors.case_not_found(case_id)
 
+    def _ref_dir_for(c: CaseEntry) -> Path:
+        if c.kind == "aligned":
+            source = project.sources[c.source_index]
+            ref_mod = "t2" if "t2" in c.modalities else c.modalities[0]
+            return c.case_dir / source.modalities[ref_mod]
+        return c.case_dir
+
     @app.exception_handler(errors.ApiError)
     async def _api_error_handler(request: Request, exc: errors.ApiError):
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
@@ -44,14 +51,9 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
     def get_case(case_id: str):
         c = find_case(case_id)
         source = project.sources[c.source_index]
-        # Resolve modality key -> subdir name for aligned sources.
-        # For raw_dicom, the "modality" is always "series" and the case_dir IS the series.
         if c.kind == "aligned":
             mod_to_subdir = source.modalities  # dict[str, str]
-            ref_mod = "t2" if "t2" in c.modalities else c.modalities[0]
-            ref_dir = c.case_dir / mod_to_subdir[ref_mod]
-        else:
-            ref_dir = c.case_dir
+        ref_dir = _ref_dir_for(c)
 
         try:
             geom = affine_from_series(ref_dir)
@@ -159,13 +161,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         raise errors.label_unknown(label_id)
 
     def _ref_geom_for(c: CaseEntry):
-        if c.kind == "aligned":
-            source = project.sources[c.source_index]
-            ref_mod = "t2" if "t2" in c.modalities else c.modalities[0]
-            ref_dir = c.case_dir / source.modalities[ref_mod]
-        else:
-            ref_dir = c.case_dir
-        return affine_from_series(ref_dir)
+        return affine_from_series(_ref_dir_for(c))
 
     @app.get("/api/cases/{case_id}/masks/{label_id}")
     def get_mask(case_id: str, label_id: int):
@@ -216,7 +212,6 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         }
         meta["reference_shape"] = list(geom.shape)
         meta_path.write_text(json.dumps(meta, indent=2))
-        # Refresh case index entry for annotated state.
         state["index"] = build_index(project_root, project)
         return {"saved_at": meta["labels"][label.name]["last_modified"],
                 "bytes": target.stat().st_size,

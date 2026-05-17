@@ -53,17 +53,10 @@ export async function populateFromEnvelope(env: {
   const volume = csCache.getVolume(SEG_VOLUME_ID);
   if (!volume) throw new Error("segmentation volume not initialized");
   const bytes = base64ToUint8(env.data);
-  const [depth, rows, cols] = env.shape;
   const scalar = (volume as any).scalarData as Uint8Array;
   scalar.fill(0);
-  for (let z = 0; z < depth; z++) {
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        const src = z * rows * cols + y * cols + x;
-        const dst = z * rows * cols + y * cols + x;
-        if (bytes[src]) scalar[dst] = labelId;
-      }
-    }
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i]) scalar[i] = labelId;
   }
   (volume as any).modified?.();
 }
@@ -73,14 +66,10 @@ export function extractEnvelope(labelId: number): { shape: [number, number, numb
   if (!volume) throw new Error("segmentation volume not initialized");
   const [cols, rows, depth] = (volume as any).dimensions as [number, number, number];
   const scalar = (volume as any).scalarData as Uint8Array;
-  const out = new Uint8Array(depth * rows * cols);
-  for (let z = 0; z < depth; z++) {
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        const idx = z * rows * cols + y * cols + x;
-        out[idx] = scalar[idx] === labelId ? 1 : 0;
-      }
-    }
+  const total = depth * rows * cols;
+  const out = new Uint8Array(total);
+  for (let i = 0; i < total; i++) {
+    out[i] = scalar[i] === labelId ? 1 : 0;
   }
   let bin = "";
   for (let i = 0; i < out.length; i++) bin += String.fromCharCode(out[i]);

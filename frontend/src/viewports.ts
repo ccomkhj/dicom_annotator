@@ -18,7 +18,7 @@ export async function loadCaseIntoViewports(args: LoadCaseArgs): Promise<void> {
     });
   }
 
-  for (const mod of modalities) {
+  await Promise.all(modalities.map(async (mod) => {
     const manifestResp = await fetch(`/images/${caseId}/${mod.key}/manifest.json`);
     const manifest = await manifestResp.json();
     const imageIds = manifest.slice_urls.map(
@@ -28,7 +28,7 @@ export async function loadCaseIntoViewports(args: LoadCaseArgs): Promise<void> {
     const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
     await (volume as unknown as { load: () => Promise<void> }).load();
     await setVolumesForViewports(renderingEngine, [{ volumeId }], [mod.viewportId]);
-  }
+  }));
 
   // Reuse synchronizers if they already exist (case switching); idempotent .add() is safe.
   let camSync = (SynchronizerManager as any).getSynchronizer("cam-sync");

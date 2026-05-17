@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,7 @@ class ReferenceGeometry:
     slice_files: list[Path]             # ordered by z
 
 
+@lru_cache(maxsize=256)
 def affine_from_series(series_dir: Path) -> ReferenceGeometry:
     """Read all DICOMs in `series_dir`, order by position-along-normal, build affine."""
     files = sorted(series_dir.glob("*.dcm"))
@@ -57,10 +59,6 @@ def affine_from_series(series_dir: Path) -> ReferenceGeometry:
     else:
         slice_mm = float(getattr(first_ds, "SpacingBetweenSlices", first_ds.SliceThickness or 1.0))
 
-    # Build affine: DICOM (LPS) -> RAS by flipping x,y.
-    # For test simplicity here we keep LPS == RAS axes (identity row/col cosines).
-    # Production-quality conversion uses nibabel.affines; for v1 with axis-aligned
-    # data this construction matches.
     affine = np.eye(4, dtype=float)
     affine[:3, 0] = row_cosine * col_mm     # column direction
     affine[:3, 1] = col_cosine * row_mm     # row direction

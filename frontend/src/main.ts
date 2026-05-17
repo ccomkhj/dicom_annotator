@@ -61,7 +61,7 @@ async function main() {
       await (await import("./viewports")).loadCaseIntoViewports({ caseId, modalities: present });
 
       const viewportIds = present.map(p => p.viewportId);
-      (window as any).__createToolGroupOnce(viewportIds);
+      (await import("./tools")).createToolGroupOnce(viewportIds);
       const { ensureSegmentationVolume, bindSegmentationToToolGroup, setActiveSegmentIndex: setActive } =
         await import("./segmentation");
       await ensureSegmentationVolume(`cornerstoneStreamingImageVolume:${caseId}:t2`);
@@ -129,7 +129,7 @@ async function main() {
      </div>`
   ).join("");
 
-  const { setActiveTool, setBrushSize, createToolGroup } = await import("./tools");
+  const { setActiveTool, setBrushSize } = await import("./tools");
   const { setActiveSegmentIndex } = await import("./segmentation");
 
   tools.querySelectorAll<HTMLButtonElement>("button[data-tool]").forEach(btn => {
@@ -152,13 +152,6 @@ async function main() {
       setActiveSegmentIndex(Number(el.dataset.labelId));
     });
   });
-
-  // Tool group is created lazily on first case load (after viewports exist).
-  (window as any).__createToolGroupOnce = (viewportIds: string[]) => {
-    if ((window as any).__toolGroupReady) return;
-    createToolGroup(viewportIds);
-    (window as any).__toolGroupReady = true;
-  };
 
   // Dirty indicator
   const { onDirtyChange, isDirty: getDirty, markClean } = await import("./dirty");

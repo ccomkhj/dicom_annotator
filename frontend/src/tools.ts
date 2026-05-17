@@ -12,7 +12,18 @@ const {
   ToolGroupManager,
 } = csTools;
 
+const FILL_STRATEGY = "FILL_INSIDE_CIRCLE";
+const ERASE_STRATEGY = "ERASE_INSIDE_CIRCLE";
+
 export type ToolName = "brush" | "erase" | "polygon" | "pan" | "zoom";
+
+let toolGroupInitialized = false;
+
+export function createToolGroupOnce(viewportIds: string[]): void {
+  if (toolGroupInitialized) return;
+  createToolGroup(viewportIds);
+  toolGroupInitialized = true;
+}
 
 export function createToolGroup(viewportIds: string[]): void {
   // addTool is idempotent at the global level — guard against double-registration
@@ -28,7 +39,7 @@ export function createToolGroup(viewportIds: string[]): void {
 
   // BrushTool handles both fill and erase via activeStrategy config.
   // Default strategy is FILL_INSIDE_CIRCLE; erase switches to ERASE_INSIDE_CIRCLE.
-  tg.addTool(BrushTool.toolName, { activeStrategy: "FILL_INSIDE_CIRCLE" });
+  tg.addTool(BrushTool.toolName, { activeStrategy: FILL_STRATEGY });
   tg.addTool(RectangleScissorsTool.toolName);
   tg.addTool(PanTool.toolName);
   tg.addTool(ZoomTool.toolName);
@@ -48,9 +59,9 @@ export function setActiveTool(name: ToolName): void {
 
   // When switching to erase mode, reconfigure BrushTool strategy before activating.
   if (name === "erase") {
-    tg.setToolConfiguration(BrushTool.toolName, { activeStrategy: "ERASE_INSIDE_CIRCLE" });
+    tg.setToolConfiguration(BrushTool.toolName, { activeStrategy: ERASE_STRATEGY });
   } else if (name === "brush") {
-    tg.setToolConfiguration(BrushTool.toolName, { activeStrategy: "FILL_INSIDE_CIRCLE" });
+    tg.setToolConfiguration(BrushTool.toolName, { activeStrategy: FILL_STRATEGY });
   }
 
   // Deactivate all left-button tools before activating the chosen one.
