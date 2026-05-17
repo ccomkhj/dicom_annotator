@@ -1,11 +1,12 @@
 import base64
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+from PIL import Image
 
 from .geometry import ReferenceGeometry
 
@@ -74,3 +75,30 @@ def envelope_to_volume(env: dict) -> np.ndarray:
     if len(raw) != expected:
         raise ShapeMismatch(f"data length {len(raw)} != prod(shape) {expected}")
     return np.frombuffer(raw, dtype=np.uint8).reshape(shape).copy()
+
+
+@dataclass
+class PngIngestResult:
+    volume: np.ndarray
+    warnings: list[str] = field(default_factory=list)
+
+
+def ingest_png_stack(png_dir: Path, geom: ReferenceGeometry) -> PngIngestResult:
+    """Read a directory of PNG slices into a uint8 volume of geom.shape.
+
+    Slice order: lexicographic filename order. Missing trailing slices are zero-padded.
+    Per-slice in-plane dimensions must match geom (rows x cols), else ShapeMismatch.
+    Binary thresholding: any non-zero pixel becomes 1.
+    """
+    depth, rows, cols = geom.shape
+    files = sorted(png_dir.glob("*.png"))
+    volume = np.zeros((depth, rows, cols), dtype=np.uint8)
+    warnings: list[str] = []
+    if len(files) != depth:
+        warnings.append(f"expected {depth} slices, found {len(files)} — padding with zeros")
+    for i, f in enumerate(files[:depth]):
+        img = np.asarray(Image.open(f).convert("L"))
+        if img.shape != (rows, cols):
+            raise ShapeMismatch(f"{f.name} shape {img.shape} != geometry ({rows},{cols})")
+        volume[i] = (img > 0).astype(np.uint8)
+    return PngIngestResult(volume=volume, warnings=warnings)
