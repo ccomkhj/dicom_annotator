@@ -44,8 +44,74 @@ async function main() {
       ];
       const present = modalitySlots.filter(m => detail.modalities.includes(m.key));
       await (await import("./viewports")).loadCaseIntoViewports({ caseId, modalities: present });
+
+      const viewportIds = present.map(p => p.viewportId);
+      (window as any).__createToolGroupOnce(viewportIds);
+      const { ensureSegmentationVolume, bindSegmentationToToolGroup, setActiveSegmentIndex: setActive } =
+        await import("./segmentation");
+      await ensureSegmentationVolume(`cornerstoneStreamingImageVolume:${caseId}:t2`);
+      await bindSegmentationToToolGroup(viewportIds);
+      setActive(project.labels[0].id);
     });
   });
+
+  // --- Tools panel ---
+  const tools = document.getElementById("tools")!;
+  tools.innerHTML = `
+    <div><strong>Tools</strong></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px">
+      <button data-tool="brush"   class="active">Brush</button>
+      <button data-tool="erase">Erase</button>
+      <button data-tool="polygon">Rect</button>
+      <button data-tool="pan">Pan</button>
+      <button data-tool="zoom">Zoom</button>
+    </div>
+    <div style="margin-top:10px">
+      <div>Brush size: <span id="brush-size-val">6</span> px</div>
+      <input type="range" min="1" max="40" value="6" id="brush-size">
+    </div>
+    <div style="margin-top:10px">
+      <strong>Labels</strong>
+      <div id="label-list"></div>
+    </div>
+  `;
+  const labelList = document.getElementById("label-list")!;
+  labelList.innerHTML = project.labels.map((l, i) =>
+    `<div class="case-row ${i === 0 ? "active" : ""}" data-label-id="${l.id}">
+       <span style="display:inline-block;width:10px;height:10px;background:${l.color};margin-right:6px"></span>${l.name} (${l.id})
+     </div>`
+  ).join("");
+
+  const { setActiveTool, setBrushSize, createToolGroup } = await import("./tools");
+  const { setActiveSegmentIndex } = await import("./segmentation");
+
+  tools.querySelectorAll<HTMLButtonElement>("button[data-tool]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      tools.querySelectorAll("button[data-tool]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      setActiveTool(btn.dataset.tool as any);
+    });
+  });
+  const sizeInput = document.getElementById("brush-size") as HTMLInputElement;
+  const sizeVal = document.getElementById("brush-size-val")!;
+  sizeInput.addEventListener("input", () => {
+    sizeVal.textContent = sizeInput.value;
+    setBrushSize(Number(sizeInput.value));
+  });
+  labelList.querySelectorAll<HTMLElement>(".case-row").forEach(el => {
+    el.addEventListener("click", () => {
+      labelList.querySelectorAll(".case-row").forEach(r => r.classList.remove("active"));
+      el.classList.add("active");
+      setActiveSegmentIndex(Number(el.dataset.labelId));
+    });
+  });
+
+  // Tool group is created lazily on first case load (after viewports exist).
+  (window as any).__createToolGroupOnce = (viewportIds: string[]) => {
+    if ((window as any).__toolGroupReady) return;
+    createToolGroup(viewportIds);
+    (window as any).__toolGroupReady = true;
+  };
 }
 
 main().catch((err) => {
