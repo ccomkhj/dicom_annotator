@@ -43,15 +43,35 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
     @app.get("/api/cases/{case_id}")
     def get_case(case_id: str):
         c = find_case(case_id)
-        # Use first modality's directory for reference geometry.
-        # For aligned cases the reference modality is t2 by convention; we pick
-        # whichever modality is present and named "t2", else first-listed.
-        ref_mod = "t2" if "t2" in c.modalities else c.modalities[0]
-        ref_dir = c.case_dir / ref_mod if c.kind == "aligned" else c.case_dir
+        source = project.sources[c.source_index]
+        # Resolve modality key -> subdir name for aligned sources.
+        # For raw_dicom, the "modality" is always "series" and the case_dir IS the series.
+        if c.kind == "aligned":
+            mod_to_subdir = source.modalities  # dict[str, str]
+            ref_mod = "t2" if "t2" in c.modalities else c.modalities[0]
+            ref_dir = c.case_dir / mod_to_subdir[ref_mod]
+        else:
+            ref_dir = c.case_dir
+
         try:
             geom = affine_from_series(ref_dir)
         except GeometryError as e:
             raise errors.geometry_error(str(e))
+
+        if c.kind == "aligned":
+            modality_files = {
+                mod: [
+                    str(p.relative_to(project_root))
+                    for p in sorted((c.case_dir / mod_to_subdir[mod]).glob("*.dcm"))
+                ]
+                for mod in c.modalities
+                if (c.case_dir / mod_to_subdir[mod]).is_dir()
+            }
+        else:
+            modality_files = {
+                "series": [str(p.relative_to(project_root)) for p in sorted(c.case_dir.glob("*.dcm"))]
+            }
+
         return {
             "id": c.id,
             "kind": c.kind,
@@ -59,14 +79,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
             "slice_count": geom.shape[0],
             "reference_shape": list(geom.shape),
             "reference_affine": geom.affine.tolist(),
-            "modality_files": {
-                mod: [
-                    str(p.relative_to(project_root))
-                    for p in sorted((c.case_dir / mod).glob("*.dcm"))
-                ]
-                for mod in c.modalities
-                if (c.case_dir / mod).is_dir()
-            } if c.kind == "aligned" else {"series": [str(p.relative_to(project_root)) for p in sorted(c.case_dir.glob("*.dcm"))]},
+            "modality_files": modality_files,
         }
 
     @app.get("/api/health")

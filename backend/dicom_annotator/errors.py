@@ -27,4 +27,4 @@ def invalid_project(message: str) -> ApiError:
 
 
 def geometry_error(message: str) -> ApiError:
-    return ApiError(500, "geometry_mismatch", message)
+    return ApiError(500, "geometry_error", message)

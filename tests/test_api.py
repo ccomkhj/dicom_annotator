@@ -70,3 +70,35 @@ def test_get_case_not_found(client: TestClient):
     r = client.get("/api/cases/does_not_exist")
     assert r.status_code == 404
     assert r.json()["error"] == "case_not_found"
+
+
+def test_get_case_with_renamed_modality_subdir(tmp_path: Path):
+    """Regression: modality key != subdir name must resolve correctly."""
+    (tmp_path / "project.yaml").write_text(
+        """
+name: rename-test
+labels:
+  - id: 1
+    name: prostate
+    color: "#000"
+sources:
+  - kind: aligned
+    root: data
+    case_glob: "case_*"
+    modalities:
+      t2: t2_images
+"""
+    )
+    write_dicom_series(tmp_path / "data" / "case_001" / "t2_images", slices=2)
+    project = load_project(tmp_path)
+    client = TestClient(create_app(tmp_path, project))
+
+    r = client.get("/api/cases/case_001")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["modalities"] == ["t2"]            # key, not subdir
+    assert body["slice_count"] == 2
+    # modality_files keyed by the modality KEY but listing files from the SUBDIR
+    files = body["modality_files"]["t2"]
+    assert len(files) == 2
+    assert all("t2_images" in f for f in files)
