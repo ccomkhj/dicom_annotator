@@ -132,4 +132,94 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         state["index"] = build_index(project_root, project)
         return {"ok": True, "case_count": len(state["index"])}
 
+    from pydantic import BaseModel
+    from .config import AlignedSource
+    from .mask_io import (
+        write_mask_nifti,
+        load_mask_nifti,
+        volume_to_envelope,
+        envelope_to_volume,
+        ingest_png_stack,
+        ShapeMismatch,
+    )
+    import hashlib, json, time
+
+    class MaskEnvelope(BaseModel):
+        shape: list[int]
+        dtype: str
+        data: str
+
+    def _annotations_path(case_id: str, label_name: str) -> Path:
+        return project_root / "annotations" / case_id / f"{label_name}.nii.gz"
+
+    def _label_by_id(label_id: int):
+        for lbl in project.labels:
+            if lbl.id == label_id:
+                return lbl
+        raise errors.label_unknown(label_id)
+
+    def _ref_geom_for(c: CaseEntry):
+        if c.kind == "aligned":
+            source = project.sources[c.source_index]
+            ref_mod = "t2" if "t2" in c.modalities else c.modalities[0]
+            ref_dir = c.case_dir / source.modalities[ref_mod]
+        else:
+            ref_dir = c.case_dir
+        return affine_from_series(ref_dir)
+
+    @app.get("/api/cases/{case_id}/masks/{label_id}")
+    def get_mask(case_id: str, label_id: int):
+        c = find_case(case_id)
+        label = _label_by_id(label_id)
+        nifti_path = _annotations_path(case_id, label.name)
+        if nifti_path.exists():
+            loaded = load_mask_nifti(nifti_path)
+            return volume_to_envelope(loaded.data)
+
+        # Try PNG-stack ingest if source is aligned + existing_masks configured
+        source = project.sources[c.source_index]
+        if isinstance(source, AlignedSource) and label.name in source.existing_masks:
+            png_dir = c.case_dir / source.existing_masks[label.name]
+            if png_dir.is_dir() and any(png_dir.glob("*.png")):
+                geom = _ref_geom_for(c)
+                result = ingest_png_stack(png_dir, geom)
+                return volume_to_envelope(result.volume) | {"warnings": result.warnings}
+
+        raise errors.ApiError(404, "mask_not_found",
+                              f"no mask for {case_id}/{label.name}",
+                              case_id=case_id, label=label.name)
+
+    @app.put("/api/cases/{case_id}/masks/{label_id}")
+    def put_mask(case_id: str, label_id: int, env: MaskEnvelope):
+        c = find_case(case_id)
+        label = _label_by_id(label_id)
+        try:
+            volume = envelope_to_volume(env.model_dump())
+        except ShapeMismatch as e:
+            raise errors.shape_mismatch(env.shape, env.shape)
+        try:
+            geom = _ref_geom_for(c)
+        except GeometryError as e:
+            raise errors.geometry_error(str(e))
+        if volume.shape != geom.shape:
+            raise errors.shape_mismatch(geom.shape, volume.shape)
+        target = _annotations_path(case_id, label.name)
+        write_mask_nifti(target, volume, geom)
+        sha = hashlib.sha256(target.read_bytes()).hexdigest()
+        meta_path = target.parent / "meta.json"
+        meta = {}
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+        meta.setdefault("labels", {})[label.name] = {
+            "last_modified": time.time(),
+            "sha256": sha,
+        }
+        meta["reference_shape"] = list(geom.shape)
+        meta_path.write_text(json.dumps(meta, indent=2))
+        # Refresh case index entry for annotated state.
+        state["index"] = build_index(project_root, project)
+        return {"saved_at": meta["labels"][label.name]["last_modified"],
+                "bytes": target.stat().st_size,
+                "sha256": sha}
+
     return app

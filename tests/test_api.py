@@ -123,3 +123,85 @@ def test_get_image_slice_bytes(client: TestClient):
 def test_get_image_unknown_modality_404(client: TestClient):
     r = client.get("/images/case_001/bogus/manifest.json")
     assert r.status_code == 404
+
+
+import base64
+
+import numpy as np
+
+from dicom_annotator.mask_io import envelope_to_volume
+
+
+def test_put_and_get_mask_roundtrip(client: TestClient):
+    # First fetch geometry to know expected shape
+    detail = client.get("/api/cases/case_001").json()
+    shape = tuple(detail["reference_shape"])
+    volume = np.zeros(shape, dtype=np.uint8)
+    volume[1, 2, 3] = 1
+    body = {
+        "shape": list(shape),
+        "dtype": "uint8",
+        "data": base64.b64encode(volume.tobytes()).decode("ascii"),
+    }
+
+    put = client.put("/api/cases/case_001/masks/1", json=body)
+    assert put.status_code == 200, put.text
+    assert "saved_at" in put.json()
+
+    get = client.get("/api/cases/case_001/masks/1")
+    assert get.status_code == 200
+    loaded = envelope_to_volume(get.json())
+    np.testing.assert_array_equal(loaded, volume)
+
+
+def test_put_mask_wrong_shape_422(client: TestClient):
+    body = {"shape": [99, 99, 99], "dtype": "uint8",
+            "data": base64.b64encode(b"\x00" * (99 * 99 * 99)).decode("ascii")}
+    r = client.put("/api/cases/case_001/masks/1", json=body)
+    assert r.status_code == 422
+    assert r.json()["error"] == "shape_mismatch"
+
+
+def test_get_mask_404_when_missing(client: TestClient):
+    r = client.get("/api/cases/case_002/masks/1")
+    assert r.status_code == 404
+
+
+def test_get_mask_synthesizes_from_png_when_configured(tmp_path: Path):
+    # Build a project that declares existing_masks
+    (tmp_path / "project.yaml").write_text(
+        """
+name: pngtest
+labels:
+  - id: 1
+    name: prostate
+    color: "#000"
+sources:
+  - kind: aligned
+    root: data
+    case_glob: "case_*"
+    modalities:
+      t2: t2
+    existing_masks:
+      prostate: mask_prostate
+"""
+    )
+    series_dir = write_dicom_series(tmp_path / "data" / "case_001" / "t2", slices=3)
+    # Add PNG mask stack with one slice filled
+    mask_dir = tmp_path / "data" / "case_001" / "mask_prostate"
+    mask_dir.mkdir()
+    from PIL import Image
+    for i in range(3):
+        arr = np.zeros((8, 8), dtype=np.uint8)
+        if i == 1:
+            arr[2, 2] = 255
+        Image.fromarray(arr, mode="L").save(mask_dir / f"{i:04d}.png")
+
+    project = load_project(tmp_path)
+    client = TestClient(create_app(tmp_path, project))
+    r = client.get("/api/cases/case_001/masks/1")
+    assert r.status_code == 200
+    vol = envelope_to_volume(r.json())
+    assert vol.shape == (3, 8, 8)
+    assert vol[1, 2, 2] == 1
+    assert vol.sum() == 1
