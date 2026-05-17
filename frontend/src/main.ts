@@ -18,6 +18,8 @@ async function main() {
     <div class="topbar">
       <strong>dicom_annotator</strong>
       <span style="flex:1"></span>
+      <button id="prev-btn">◀ Prev</button>
+      <button id="next-btn">Next ▶</button>
       <span class="dirty-dot" id="dirty"></span>
       <button class="primary" id="save-btn">Save</button>
     </div>
@@ -175,6 +177,24 @@ async function main() {
   window.addEventListener("keydown", e => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveAll(); }
   });
+
+  const caseRows = Array.from(list.querySelectorAll<HTMLDivElement>(".case-row"));
+  function currentCaseRow(): HTMLDivElement | undefined {
+    return caseRows.find(r => r.classList.contains("active"));
+  }
+  function neighbour(offset: number): HTMLDivElement | undefined {
+    const cur = currentCaseRow();
+    if (!cur) return caseRows[0];
+    const idx = caseRows.indexOf(cur);
+    return caseRows[idx + offset];
+  }
+  const goPrev = () => { const p = neighbour(-1); if (p) p.click(); };
+  const goNext = () => { const n = neighbour(1);  if (n) n.click(); };
+  document.getElementById("prev-btn")!.addEventListener("click", goPrev);
+  document.getElementById("next-btn")!.addEventListener("click", goNext);
+
+  const { installShortcuts } = await import("./shortcuts");
+  installShortcuts(project.labels.map(l => l.id), goPrev, goNext);
 }
 
 main().catch((err) => {
