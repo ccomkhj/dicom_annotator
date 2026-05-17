@@ -22,6 +22,10 @@ def shape_mismatch(expected: tuple, got: tuple) -> ApiError:
                     expected=list(expected), got=list(got))
 
 
+def invalid_envelope(message: str) -> ApiError:
+    return ApiError(422, "invalid_envelope", message)
+
+
 def invalid_project(message: str) -> ApiError:
     return ApiError(400, "invalid_project", message)
 

@@ -196,7 +196,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         try:
             volume = envelope_to_volume(env.model_dump())
         except ShapeMismatch as e:
-            raise errors.shape_mismatch(env.shape, env.shape)
+            raise errors.invalid_envelope(str(e))
         try:
             geom = _ref_geom_for(c)
         except GeometryError as e:

@@ -162,6 +162,18 @@ def test_put_mask_wrong_shape_422(client: TestClient):
     assert r.json()["error"] == "shape_mismatch"
 
 
+def test_put_mask_invalid_envelope_data_length(client: TestClient):
+    """When envelope data length doesn't match declared shape, return 422 invalid_envelope."""
+    body = {
+        "shape": [3, 8, 8],     # declares 192 bytes
+        "dtype": "uint8",
+        "data": base64.b64encode(b"\x00" * 10).decode("ascii"),  # but only 10 bytes
+    }
+    r = client.put("/api/cases/case_001/masks/1", json=body)
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_envelope"
+
+
 def test_get_mask_404_when_missing(client: TestClient):
     r = client.get("/api/cases/case_002/masks/1")
     assert r.status_code == 404
