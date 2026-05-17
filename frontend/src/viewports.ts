@@ -1,6 +1,6 @@
 import { renderingEngine, ViewportType, volumeLoader } from "./cornerstone-init";
 import { Enums, setVolumesForViewports } from "@cornerstonejs/core";
-import { synchronizers } from "@cornerstonejs/tools";
+import { synchronizers, SynchronizerManager } from "@cornerstonejs/tools";
 
 export interface LoadCaseArgs {
   caseId: string;
@@ -30,12 +30,18 @@ export async function loadCaseIntoViewports(args: LoadCaseArgs): Promise<void> {
     await setVolumesForViewports(renderingEngine, [{ volumeId }], [mod.viewportId]);
   }
 
-  // Sync slice (camera) and VOI/WW-WL across viewports.
-  const camSync = synchronizers.createCameraPositionSynchronizer("cam-sync");
-  const voiSync = synchronizers.createVOISynchronizer("voi-sync", { syncInvertState: false, syncColormap: false });
+  // Reuse synchronizers if they already exist (case switching); idempotent .add() is safe.
+  let camSync = (SynchronizerManager as any).getSynchronizer("cam-sync");
+  if (!camSync) {
+    camSync = synchronizers.createCameraPositionSynchronizer("cam-sync");
+  }
+  let voiSync = (SynchronizerManager as any).getSynchronizer("voi-sync");
+  if (!voiSync) {
+    voiSync = synchronizers.createVOISynchronizer("voi-sync", { syncInvertState: false, syncColormap: false });
+  }
   for (const mod of modalities) {
-    camSync.add({ renderingEngineId: renderingEngine.id, viewportId: mod.viewportId });
-    voiSync.add({ renderingEngineId: renderingEngine.id, viewportId: mod.viewportId });
+    try { camSync.add({ renderingEngineId: renderingEngine.id, viewportId: mod.viewportId }); } catch {}
+    try { voiSync.add({ renderingEngineId: renderingEngine.id, viewportId: mod.viewportId }); } catch {}
   }
 
   renderingEngine.render();

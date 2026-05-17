@@ -87,6 +87,14 @@ export function extractEnvelope(labelId: number): { shape: [number, number, numb
   return { shape: [depth, rows, cols], dtype: "uint8", data: btoa(bin) };
 }
 
+export function clearSegmentationVolume(): void {
+  const volume = csCache.getVolume(SEG_VOLUME_ID);
+  if (!volume) return;
+  const scalar = (volume as any).scalarData as Uint8Array;
+  scalar.fill(0);
+  (volume as any).modified?.();
+}
+
 export function installDirtyTracker(): void {
   const volume = csCache.getVolume(SEG_VOLUME_ID);
   if (!volume) return;

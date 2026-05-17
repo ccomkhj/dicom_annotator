@@ -66,6 +66,8 @@ async function main() {
         await import("./segmentation");
       await ensureSegmentationVolume(`cornerstoneStreamingImageVolume:${caseId}:t2`);
       await bindSegmentationToToolGroup(viewportIds);
+      const { clearSegmentationVolume } = await import("./segmentation");
+      clearSegmentationVolume();
       (await import("./segmentation")).installDirtyTracker();
       setActive(project.labels[0].id);
 
@@ -165,13 +167,18 @@ async function main() {
 
   async function saveAll() {
     if (!currentCaseId) return;
-    const { extractEnvelope } = await import("./segmentation");
-    const { putMask } = await import("./api");
-    for (const lbl of project.labels) {
-      const env = extractEnvelope(lbl.id);
-      await putMask(currentCaseId, lbl.id, env);
+    try {
+      const { extractEnvelope } = await import("./segmentation");
+      const { putMask } = await import("./api");
+      for (const lbl of project.labels) {
+        const env = extractEnvelope(lbl.id);
+        await putMask(currentCaseId, lbl.id, env);
+      }
+      markClean();
+      showBanner("Saved");
+    } catch (err) {
+      showBanner(`Save failed: ${(err as Error).message ?? err}`);
     }
-    markClean();
   }
   document.getElementById("save-btn")!.addEventListener("click", saveAll);
   window.addEventListener("keydown", e => {
