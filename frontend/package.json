@@ -1,0 +1,21 @@
+{
+  "name": "dicom-annotator-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@cornerstonejs/core": "^1.77.0",
+    "@cornerstonejs/dicom-image-loader": "^1.77.0",
+    "@cornerstonejs/tools": "^1.77.0",
+    "dicom-parser": "^1.8.21"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "vite": "^5.1.0"
+  }
+}
