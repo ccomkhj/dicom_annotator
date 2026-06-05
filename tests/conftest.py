@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import pytest
 
 
@@ -58,7 +59,6 @@ def make_aligned_existing_mask(case_dir: Path, mask_subdir: str, slice_count: in
 
 
 import numpy as np
-import pydicom
 from pydicom.dataset import Dataset, FileDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
@@ -105,9 +105,10 @@ def write_dicom_slice(
     ds.SamplesPerPixel = 1
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.PixelData = image.astype(np.uint16).tobytes()
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
-    ds.save_as(path, write_like_original=False)
+    # Transfer syntax (Explicit VR LE) is set in file_meta above; pydicom 3
+    # infers endianness/VR from it. enforce_file_format replaces the removed
+    # write_like_original=False.
+    ds.save_as(path, enforce_file_format=True)
     return path
 
 
@@ -162,9 +163,7 @@ def write_secondary_capture_slice(
     ds.SamplesPerPixel = 1
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.PixelData = image.astype(np.uint16).tobytes()
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
-    ds.save_as(path, write_like_original=False)
+    ds.save_as(path, enforce_file_format=True)
     return path
 
 

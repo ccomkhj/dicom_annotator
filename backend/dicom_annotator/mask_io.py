@@ -97,7 +97,8 @@ def ingest_png_stack(png_dir: Path, geom: ReferenceGeometry) -> PngIngestResult:
     if len(files) != depth:
         warnings.append(f"expected {depth} slices, found {len(files)} — padding with zeros")
     for i, f in enumerate(files[:depth]):
-        img = np.asarray(Image.open(f).convert("L"))
+        with Image.open(f) as pil_img:
+            img = np.asarray(pil_img.convert("L"))
         if img.shape != (rows, cols):
             raise ShapeMismatch(f"{f.name} shape {img.shape} != geometry ({rows},{cols})")
         volume[i] = (img > 0).astype(np.uint8)

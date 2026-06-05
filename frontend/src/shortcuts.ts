@@ -1,27 +1,33 @@
-import { setActiveTool, setBrushSize } from "./tools";
-import { setActiveSegmentIndex } from "./segmentation";
+import type { ToolName } from "./tools";
 
-export function installShortcuts(labelIds: number[], onPrevCase: () => void, onNextCase: () => void) {
-  window.addEventListener("keydown", e => {
-    if ((e.target as HTMLElement)?.tagName === "INPUT") return;
-    switch (e.key) {
-      case "b": setActiveTool("brush"); break;
-      case "e": setActiveTool("erase"); break;
-      case "p": setActiveTool("polygon"); break;
-      case "[": setBrushSize(Math.max(1, getBrushSize() - 1)); break;
-      case "]": setBrushSize(getBrushSize() + 1); break;
-      case "PageUp":   onPrevCase(); break;
-      case "PageDown": onNextCase(); break;
-      default:
-        if (/^[1-9]$/.test(e.key)) {
-          const idx = Number(e.key) - 1;
-          if (idx < labelIds.length) setActiveSegmentIndex(labelIds[idx]);
-        }
-    }
-  });
+export interface ShortcutHandlers {
+  onTool: (t: ToolName) => void;
+  onBrushDelta: (delta: number) => void;
+  onLabelIndex: (index: number) => void;
+  onPrevCase: () => void;
+  onNextCase: () => void;
 }
 
-function getBrushSize(): number {
-  const el = document.getElementById("brush-size") as HTMLInputElement | null;
-  return el ? Number(el.value) : 6;
+let installed = false;
+
+export function installShortcuts(h: ShortcutHandlers): void {
+  // Guard against double-install (e.g. if main() ever re-runs) so each keypress
+  // fires its handler exactly once.
+  if (installed) return;
+  installed = true;
+
+  window.addEventListener("keydown", (e) => {
+    if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+    switch (e.key) {
+      case "b": h.onTool("brush"); break;
+      case "e": h.onTool("erase"); break;
+      case "p": h.onTool("polygon"); break;
+      case "[": h.onBrushDelta(-1); break;
+      case "]": h.onBrushDelta(1); break;
+      case "PageUp":   e.preventDefault(); h.onPrevCase(); break;
+      case "PageDown": e.preventDefault(); h.onNextCase(); break;
+      default:
+        if (/^[1-9]$/.test(e.key)) h.onLabelIndex(Number(e.key) - 1);
+    }
+  });
 }

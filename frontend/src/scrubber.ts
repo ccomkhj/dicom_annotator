@@ -21,6 +21,7 @@ export function attachScrubber(args: {
     num.textContent = String(idx);
     for (const vid of viewportIds) {
       const vp = renderingEngine.getViewport(vid) as any;
+      if (!vp) continue;
       if (typeof vp.setSliceIndex === "function") {
         vp.setSliceIndex(idx);
       } else if (typeof vp.setImageIdIndex === "function") {
@@ -34,6 +35,7 @@ export function attachScrubber(args: {
 
 export function currentSlice(viewportId: string): number {
   const vp = renderingEngine.getViewport(viewportId) as any;
+  if (!vp) return 0;
   if (typeof vp.getSliceIndex === "function") return vp.getSliceIndex();
   if (typeof vp.getCurrentImageIdIndex === "function") return vp.getCurrentImageIdIndex();
   return 0;

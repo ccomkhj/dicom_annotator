@@ -1,4 +1,4 @@
-from dicom_annotator.config import load_project, Project, Label, AlignedSource, RawDicomSource
+from dicom_annotator.config import AlignedSource, Label, Project, RawDicomSource, load_project
 
 
 def test_load_project_parses_labels(project_root):
@@ -35,3 +35,28 @@ def test_load_project_missing_file_raises(tmp_path):
     import pytest
     with pytest.raises(FileNotFoundError):
         load_project(tmp_path)
+
+
+def test_duplicate_label_ids_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Project(
+            name="dup",
+            labels=[Label(id=1, name="a", color="#000"), Label(id=1, name="b", color="#111")],
+            sources=[],
+        )
+
+
+def test_duplicate_label_names_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    # Same name -> same <name>.nii.gz path -> one mask would overwrite the other.
+    with pytest.raises(ValidationError):
+        Project(
+            name="dup",
+            labels=[Label(id=1, name="prostate", color="#000"), Label(id=2, name="prostate", color="#111")],
+            sources=[],
+        )

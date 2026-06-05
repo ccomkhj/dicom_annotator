@@ -1,8 +1,8 @@
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Label(BaseModel):
@@ -27,7 +27,7 @@ class RawDicomSource(BaseModel):
 
 
 Source = Annotated[
-    Union[AlignedSource, RawDicomSource],
+    AlignedSource | RawDicomSource,
     Field(discriminator="kind"),
 ]
 
@@ -36,6 +36,17 @@ class Project(BaseModel):
     name: str
     labels: list[Label]
     sources: list[Source]
+
+    @model_validator(mode="after")
+    def _labels_unique(self) -> "Project":
+        ids = [lbl.id for lbl in self.labels]
+        names = [lbl.name for lbl in self.labels]
+        if len(set(ids)) != len(ids):
+            raise ValueError("label ids must be unique")
+        # Names map to mask filenames (<name>.nii.gz); duplicates would overwrite.
+        if len(set(names)) != len(names):
+            raise ValueError("label names must be unique")
+        return self
 
 
 def load_project(project_root: Path) -> Project:

@@ -125,6 +125,87 @@ def test_get_image_unknown_modality_404(client: TestClient):
     assert r.status_code == 404
 
 
+def test_image_slice_out_of_range_404(client: TestClient):
+    r = client.get("/images/case_001/t2/99.dcm")
+    assert r.status_code == 404
+    assert r.json()["error"] == "slice_out_of_range"
+
+
+def test_get_mask_unknown_label_404(client: TestClient):
+    r = client.get("/api/cases/case_001/masks/999")
+    assert r.status_code == 404
+    assert r.json()["error"] == "label_unknown"
+
+
+def test_put_mask_unknown_label_404(client: TestClient):
+    body = {"shape": [3, 8, 8], "dtype": "uint8",
+            "data": base64.b64encode(b"\x00" * (3 * 8 * 8)).decode("ascii")}
+    r = client.put("/api/cases/case_001/masks/999", json=body)
+    assert r.status_code == 404
+    assert r.json()["error"] == "label_unknown"
+
+
+def test_raw_dicom_case_end_to_end(tmp_path: Path):
+    """The raw_dicom source path (flat series, single 'series' modality) was
+    entirely untested through HTTP."""
+    (tmp_path / "project.yaml").write_text(
+        """
+name: rawtest
+labels:
+  - id: 1
+    name: lesion
+    color: "#f00"
+sources:
+  - kind: raw_dicom
+    root: nbia
+    case_pattern: "patient_*/study_*/series_*"
+"""
+    )
+    series = tmp_path / "nbia" / "patient_a" / "study_1" / "series_1"
+    write_dicom_series(series, slices=4)
+    project = load_project(tmp_path)
+    client = TestClient(create_app(tmp_path, project))
+
+    cases = client.get("/api/cases").json()
+    assert len(cases) == 1
+    case_id = cases[0]["id"]
+    assert cases[0]["kind"] == "raw_dicom"
+    assert cases[0]["modalities"] == ["series"]
+
+    detail = client.get(f"/api/cases/{case_id}").json()
+    assert detail["slice_count"] == 4
+
+    manifest = client.get(f"/images/{case_id}/series/manifest.json")
+    assert manifest.status_code == 200
+    assert len(manifest.json()["slice_urls"]) == 4
+
+    slice0 = client.get(f"/images/{case_id}/series/0.dcm")
+    assert slice0.status_code == 200
+
+
+def test_health(client: TestClient):
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["case_count"] == 2
+
+
+def test_refresh_picks_up_new_case(client: TestClient, aligned_project_root: Path):
+    """POST /api/refresh rescans the filesystem so a newly-added case appears."""
+    write_dicom_series(aligned_project_root / "data" / "case_003" / "t2", slices=3)
+
+    before = {c["id"] for c in client.get("/api/cases").json()}
+    assert "case_003" not in before
+
+    r = client.post("/api/refresh")
+    assert r.status_code == 200
+    assert r.json()["case_count"] == 3
+
+    after = {c["id"] for c in client.get("/api/cases").json()}
+    assert "case_003" in after
+
+
 import base64
 
 import numpy as np
@@ -154,6 +235,32 @@ def test_put_and_get_mask_roundtrip(client: TestClient):
     np.testing.assert_array_equal(loaded, volume)
 
 
+def test_put_mask_recovers_from_corrupt_meta(client: TestClient, aligned_project_root: Path):
+    """A truncated/corrupt meta.json (e.g. from a crash mid-write) must not break
+    the next save: put_mask treats unreadable JSON as empty and writes valid JSON."""
+    import json
+
+    detail = client.get("/api/cases/case_001").json()
+    shape = tuple(detail["reference_shape"])
+    volume = np.zeros(shape, dtype=np.uint8)
+    body = {
+        "shape": list(shape),
+        "dtype": "uint8",
+        "data": base64.b64encode(volume.tobytes()).decode("ascii"),
+    }
+
+    # Plant a corrupt meta.json where the save will land.
+    meta_path = aligned_project_root / "annotations" / "case_001" / "meta.json"
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text('{"labels": {"prostate": ')  # truncated JSON
+
+    put = client.put("/api/cases/case_001/masks/1", json=body)
+    assert put.status_code == 200, put.text
+    # meta.json is now valid JSON again and records the saved label.
+    meta = json.loads(meta_path.read_text())
+    assert "prostate" in meta["labels"]
+
+
 def test_put_mask_wrong_shape_422(client: TestClient):
     body = {"shape": [99, 99, 99], "dtype": "uint8",
             "data": base64.b64encode(b"\x00" * (99 * 99 * 99)).decode("ascii")}
@@ -172,6 +279,24 @@ def test_put_mask_invalid_envelope_data_length(client: TestClient):
     r = client.put("/api/cases/case_001/masks/1", json=body)
     assert r.status_code == 422
     assert r.json()["error"] == "invalid_envelope"
+
+
+def test_get_mask_warns_on_geometry_drift(client: TestClient, aligned_project_root: Path):
+    """A stored mask whose shape no longer matches the reference geometry must be
+    returned with a warning (DICOM was reprocessed under it), not silently."""
+    import nibabel as nib
+
+    ann = aligned_project_root / "annotations" / "case_001"
+    ann.mkdir(parents=True)
+    # Reference is (3, 8, 8); write a (5, 5, 5) mask (stored XYZ, so transpose).
+    wrong = np.zeros((5, 5, 5), dtype=np.uint8)
+    nib.save(nib.Nifti1Image(np.transpose(wrong, (2, 1, 0)), np.eye(4)), ann / "prostate.nii.gz")
+
+    r = client.get("/api/cases/case_001/masks/1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["shape"] == [5, 5, 5]
+    assert "warnings" in body and body["warnings"]
 
 
 def test_get_mask_404_when_missing(client: TestClient):
@@ -198,7 +323,7 @@ sources:
       prostate: mask_prostate
 """
     )
-    series_dir = write_dicom_series(tmp_path / "data" / "case_001" / "t2", slices=3)
+    write_dicom_series(tmp_path / "data" / "case_001" / "t2", slices=3)
     # Add PNG mask stack with one slice filled
     mask_dir = tmp_path / "data" / "case_001" / "mask_prostate"
     mask_dir.mkdir()

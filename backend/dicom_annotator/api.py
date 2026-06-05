@@ -1,3 +1,5 @@
+import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -6,18 +8,36 @@ from fastapi.responses import JSONResponse
 from . import errors
 from .case_index import CaseEntry, build_index
 from .config import Project
-from .geometry import affine_from_series, GeometryError
+from .geometry import GeometryError, affine_from_series
+
+logger = logging.getLogger("dicom_annotator")
 
 
 def create_app(project_root: Path, project: Project) -> FastAPI:
     app = FastAPI(title="dicom_annotator")
-    state: dict = {"index": build_index(project_root, project)}
+    state: dict = {}
+
+    def _set_index(entries: list[CaseEntry]) -> None:
+        # Keep the ordered list (for /api/cases) and an id->entry map (O(1) lookup) in sync.
+        state["index"] = entries
+        state["by_id"] = {c.id: c for c in entries}
+
+    _set_index(build_index(project_root, project))
+
+    @app.middleware("http")
+    async def _log_requests(request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        dur_ms = (time.perf_counter() - start) * 1000
+        logger.info("%s %s -> %d %.1fms", request.method, request.url.path,
+                    response.status_code, dur_ms)
+        return response
 
     def find_case(case_id: str) -> CaseEntry:
-        for c in state["index"]:
-            if c.id == case_id:
-                return c
-        raise errors.case_not_found(case_id)
+        c = state["by_id"].get(case_id)
+        if c is None:
+            raise errors.case_not_found(case_id)
+        return c
 
     def _ref_dir_for(c: CaseEntry) -> Path:
         if c.kind == "aligned":
@@ -50,15 +70,12 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
     @app.get("/api/cases/{case_id}")
     def get_case(case_id: str):
         c = find_case(case_id)
-        source = project.sources[c.source_index]
-        if c.kind == "aligned":
-            mod_to_subdir = source.modalities  # dict[str, str]
         ref_dir = _ref_dir_for(c)
 
         try:
             geom = affine_from_series(ref_dir)
         except GeometryError as e:
-            raise errors.geometry_error(str(e))
+            raise errors.geometry_error(str(e)) from e
 
         def _rel(p: Path) -> str:
             try:
@@ -68,6 +85,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
                 return str(p)
 
         if c.kind == "aligned":
+            mod_to_subdir = project.sources[c.source_index].modalities  # dict[str, str]
             modality_files = {
                 mod: [_rel(p) for p in sorted((c.case_dir / mod_to_subdir[mod]).glob("*.dcm"))]
                 for mod in c.modalities
@@ -89,6 +107,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         }
 
     from fastapi.responses import FileResponse
+
     from .readers import build_series_manifest
 
     def _modality_dir(c: CaseEntry, modality: str) -> Path:
@@ -113,7 +132,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         try:
             return build_series_manifest(mod_dir, slice_url_prefix=f"/images/{case_id}/{modality}")
         except GeometryError as e:
-            raise errors.geometry_error(str(e))
+            raise errors.geometry_error(str(e)) from e
 
     @app.get("/images/{case_id}/{modality}/{slice_idx}.dcm")
     def image_slice(case_id: str, modality: str, slice_idx: int):
@@ -122,7 +141,7 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         try:
             geom = affine_from_series(mod_dir)
         except GeometryError as e:
-            raise errors.geometry_error(str(e))
+            raise errors.geometry_error(str(e)) from e
         if slice_idx < 0 or slice_idx >= len(geom.slice_files):
             raise errors.ApiError(404, "slice_out_of_range",
                                   f"slice {slice_idx} out of range [0,{len(geom.slice_files)})",
@@ -135,20 +154,28 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
 
     @app.post("/api/refresh")
     def refresh():
-        state["index"] = build_index(project_root, project)
+        # Drop cached geometry too: refresh exists precisely to pick up DICOM
+        # changed on disk, which the lru_cache would otherwise serve stale.
+        affine_from_series.cache_clear()
+        _set_index(build_index(project_root, project))
         return {"ok": True, "case_count": len(state["index"])}
 
+    import hashlib
+    import json
+    import os
+    import tempfile
+
     from pydantic import BaseModel
+
     from .config import AlignedSource
     from .mask_io import (
-        write_mask_nifti,
-        load_mask_nifti,
-        volume_to_envelope,
+        ShapeMismatch,
         envelope_to_volume,
         ingest_png_stack,
-        ShapeMismatch,
+        load_mask_nifti,
+        volume_to_envelope,
+        write_mask_nifti,
     )
-    import hashlib, json, time
 
     class MaskEnvelope(BaseModel):
         shape: list[int]
@@ -174,7 +201,21 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         nifti_path = _annotations_path(case_id, label.name)
         if nifti_path.exists():
             loaded = load_mask_nifti(nifti_path)
-            return volume_to_envelope(loaded.data)
+            env = volume_to_envelope(loaded.data)
+            # Detect geometry drift: a mask saved against an older reference whose
+            # DICOM was since replaced. Non-fatal — surface as a UI warning.
+            try:
+                geom = _ref_geom_for(c)
+            except GeometryError:
+                geom = None
+            if geom is not None and loaded.data.shape != geom.shape:
+                logger.warning("mask %s/%s shape %s != reference %s",
+                               case_id, label.name, loaded.data.shape, geom.shape)
+                env["warnings"] = [
+                    f"stored mask shape {tuple(loaded.data.shape)} differs from "
+                    f"reference {tuple(geom.shape)}"
+                ]
+            return env
 
         # Try PNG-stack ingest if source is aligned + existing_masks configured
         source = project.sources[c.source_index]
@@ -196,11 +237,11 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         try:
             volume = envelope_to_volume(env.model_dump())
         except ShapeMismatch as e:
-            raise errors.invalid_envelope(str(e))
+            raise errors.invalid_envelope(str(e)) from e
         try:
             geom = _ref_geom_for(c)
         except GeometryError as e:
-            raise errors.geometry_error(str(e))
+            raise errors.geometry_error(str(e)) from e
         if volume.shape != geom.shape:
             raise errors.shape_mismatch(geom.shape, volume.shape)
         target = _annotations_path(case_id, label.name)
@@ -209,14 +250,30 @@ def create_app(project_root: Path, project: Project) -> FastAPI:
         meta_path = target.parent / "meta.json"
         meta = {}
         if meta_path.exists():
-            meta = json.loads(meta_path.read_text())
+            try:
+                meta = json.loads(meta_path.read_text())
+            except (json.JSONDecodeError, ValueError):
+                # Corrupt/truncated meta (e.g. crash mid-write) — start fresh
+                # rather than 500 on every subsequent save.
+                meta = {}
         meta.setdefault("labels", {})[label.name] = {
             "last_modified": time.time(),
             "sha256": sha,
         }
         meta["reference_shape"] = list(geom.shape)
-        meta_path.write_text(json.dumps(meta, indent=2))
-        state["index"] = build_index(project_root, project)
+        # Atomic write (mirror write_mask_nifti) so a crash can't truncate meta.json.
+        fd, tmp = tempfile.mkstemp(prefix=".", dir=str(meta_path.parent), suffix=".json")
+        try:
+            with os.fdopen(fd, "w") as fh:
+                fh.write(json.dumps(meta, indent=2))
+            os.replace(tmp, meta_path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        _set_index(build_index(project_root, project))
         return {"saved_at": meta["labels"][label.name]["last_modified"],
                 "bytes": target.stat().st_size,
                 "sha256": sha}
