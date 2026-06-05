@@ -1,20 +1,19 @@
 import base64
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 import pytest
 from PIL import Image
 
 from dicom_annotator.geometry import ReferenceGeometry
 from dicom_annotator.mask_io import (
-    write_mask_nifti,
+    PngIngestResult,
+    ShapeMismatch,
+    envelope_to_volume,
+    ingest_png_stack,
     load_mask_nifti,
     volume_to_envelope,
-    envelope_to_volume,
-    ShapeMismatch,
-    ingest_png_stack,
-    PngIngestResult,
+    write_mask_nifti,
 )
 
 
@@ -24,7 +23,7 @@ def _make_geom(shape=(3, 4, 5)) -> ReferenceGeometry:
         shape=shape,
         spacing=(1.0, 1.0, 1.0),
         affine=affine,
-        slice_files=[],
+        slice_files=(),
     )
 
 
@@ -117,3 +116,24 @@ def test_ingest_png_stack_rejects_dim_mismatch(tmp_path: Path):
     geom = _make_geom((1, 4, 5))
     with pytest.raises(ShapeMismatch):
         ingest_png_stack(png_dir, geom)
+
+
+def test_write_mask_nifti_rejects_non_uint8(tmp_path: Path):
+    geom = _make_geom((2, 3, 4))
+    with pytest.raises(ValueError):
+        write_mask_nifti(tmp_path / "m.nii.gz", np.zeros((2, 3, 4), dtype=np.int16), geom)
+
+
+def test_volume_to_envelope_rejects_non_uint8():
+    with pytest.raises(ValueError):
+        volume_to_envelope(np.zeros((2, 2, 2), dtype=np.int16))
+
+
+def test_volume_to_envelope_rejects_non_3d():
+    with pytest.raises(ValueError):
+        volume_to_envelope(np.zeros((2, 2), dtype=np.uint8))
+
+
+def test_envelope_to_volume_rejects_unsupported_dtype():
+    with pytest.raises(ValueError):
+        envelope_to_volume({"shape": [1, 1, 1], "dtype": "float32", "data": ""})

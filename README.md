@@ -56,11 +56,32 @@ npm run dev
 
 Open http://localhost:5173 — the Vite dev server proxies `/api` and `/images` to the backend on port 8000.
 
-## Tests
+### Using the annotator
+
+- Left panel: filterable case list with ✔ (annotated) / ○ markers; the top bar shows the current position (`12 / 47`).
+- Pick a case, choose a label (right panel or keys `1`–`9`), and paint with the brush.
+- Switching cases warns if you have unsaved changes; a successful save flips the case to ✔.
+- Masks that no longer match the reference geometry (DICOM reprocessed) are skipped with a banner instead of loading misaligned.
+
+## Tests & lint
+
+Backend:
 
 ```bash
-uv run pytest
+uv run pytest          # unit + API tests
+uv run ruff check backend tests
 ```
+
+Frontend:
+
+```bash
+cd frontend
+npm test               # vitest (pure mask-codec + dirty-state logic)
+npx tsc -p tsconfig.json --noEmit   # type-check
+npm run build          # production build
+```
+
+CI runs all of the above on push / PR (`.github/workflows/ci.yml`).
 
 ## Layout
 

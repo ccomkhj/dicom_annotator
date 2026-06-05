@@ -1,14 +1,44 @@
 import { volumeLoader, cache as csCache } from "@cornerstonejs/core";
 import * as csTools from "@cornerstonejs/tools";
 import { markDirty } from "./dirty";
+import { renderingEngine } from "./cornerstone-init";
+import { encodeLabelEnvelope, applyLabelEnvelope } from "./mask-codec";
 
 export const TOOL_GROUP_ID = "dicom-annotator-tools";
 export const SEG_VOLUME_ID = "dicom-annotator-seg";
 
+function sameDims(a?: number[], b?: number[]): boolean {
+  return !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+// Best-effort teardown of the current segmentation. Cornerstone v1.77 has
+// shifted these method names across point releases, so we try the known
+// spellings and swallow failures — a leftover cache entry only matters if the
+// subsequent create throws, which surfaces as a load error (not corruption).
+// VERIFY IN BROWSER: confirm the seg overlay actually clears on case switch.
+async function teardownSegmentation(): Promise<void> {
+  const s = csTools.segmentation as any;
+  try { await s.removeSegmentationsFromToolGroup?.(TOOL_GROUP_ID); } catch { /* noop */ }
+  try { await s.removeSegmentationRepresentations?.(TOOL_GROUP_ID); } catch { /* noop */ }
+  try { s.state?.removeSegmentation?.(SEG_VOLUME_ID); } catch { /* noop */ }
+  const c = csCache as any;
+  try { c.removeVolumeLoadObject?.(SEG_VOLUME_ID); } catch { /* noop */ }
+  try { c.removeVolume?.(SEG_VOLUME_ID); } catch { /* noop */ }
+}
+
 export async function ensureSegmentationVolume(referenceVolumeId: string): Promise<string> {
   // Use segmentation.state.getSegmentation (v1.77 API) instead of csTools.cache
   const existing = (csTools.segmentation.state as any).getSegmentation?.(SEG_VOLUME_ID);
-  if (existing) return SEG_VOLUME_ID;
+  const existingVol = csCache.getVolume(SEG_VOLUME_ID) as any;
+  const refVol = csCache.getVolume(referenceVolumeId) as any;
+
+  // Reuse only if the existing seg volume shares the new case's voxel grid.
+  // Otherwise the labelmap would be the wrong shape for the new reference and
+  // PUT would 422 on shape_mismatch — so tear it down and rebuild.
+  if (existing && existingVol && refVol && sameDims(existingVol.dimensions, refVol.dimensions)) {
+    return SEG_VOLUME_ID;
+  }
+  if (existing) await teardownSegmentation();
 
   await (volumeLoader as any).createAndCacheDerivedSegmentationVolume(referenceVolumeId, {
     volumeId: SEG_VOLUME_ID,
@@ -40,40 +70,26 @@ export function setActiveSegmentIndex(labelId: number): void {
   csTools.segmentation.segmentIndex.setActiveSegmentIndex(SEG_VOLUME_ID, labelId);
 }
 
-function base64ToUint8(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
 export async function populateFromEnvelope(env: {
   shape: [number, number, number]; dtype: "uint8"; data: string;
 }, labelId: number): Promise<void> {
   const volume = csCache.getVolume(SEG_VOLUME_ID);
   if (!volume) throw new Error("segmentation volume not initialized");
-  const bytes = base64ToUint8(env.data);
-  const scalar = (volume as any).scalarData as Uint8Array;
-  scalar.fill(0);
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i]) scalar[i] = labelId;
-  }
+  // applyLabelEnvelope does NOT clear — this runs once per label in a loop, and
+  // the caller clears the whole volume once before the loop.
+  applyLabelEnvelope((volume as any).scalarData as Uint8Array, env.data, labelId);
   (volume as any).modified?.();
+  renderingEngine.render();
 }
 
 export function extractEnvelope(labelId: number): { shape: [number, number, number]; dtype: "uint8"; data: string } {
   const volume = csCache.getVolume(SEG_VOLUME_ID);
   if (!volume) throw new Error("segmentation volume not initialized");
-  const [cols, rows, depth] = (volume as any).dimensions as [number, number, number];
-  const scalar = (volume as any).scalarData as Uint8Array;
-  const total = depth * rows * cols;
-  const out = new Uint8Array(total);
-  for (let i = 0; i < total; i++) {
-    out[i] = scalar[i] === labelId ? 1 : 0;
-  }
-  let bin = "";
-  for (let i = 0; i < out.length; i++) bin += String.fromCharCode(out[i]);
-  return { shape: [depth, rows, cols], dtype: "uint8", data: btoa(bin) };
+  return encodeLabelEnvelope(
+    (volume as any).scalarData as Uint8Array,
+    (volume as any).dimensions as [number, number, number],
+    labelId,
+  );
 }
 
 export function clearSegmentationVolume(): void {
@@ -85,14 +101,17 @@ export function clearSegmentationVolume(): void {
 }
 
 export function installDirtyTracker(): void {
-  const volume = csCache.getVolume(SEG_VOLUME_ID);
-  if (!volume) return;
-  const v = volume as any;
-  if (v.modified && typeof v.modified === "function") {
+  const v = csCache.getVolume(SEG_VOLUME_ID) as any;
+  // Guard tied to the volume object: a reused volume is already patched (avoid
+  // stacking wrappers per case switch); a recreated volume has no flag and gets
+  // a fresh patch.
+  if (!v || v.__dirtyTracked) return;
+  if (typeof v.modified === "function") {
     const originalModified = v.modified.bind(v);
     v.modified = function () {
       markDirty();
       return originalModified();
     };
+    v.__dirtyTracked = true;
   }
 }

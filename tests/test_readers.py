@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from dicom_annotator.readers import build_series_manifest

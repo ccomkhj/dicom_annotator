@@ -2,18 +2,41 @@
 body { margin: 0; font: 13px/1.4 -apple-system, sans-serif; background: #111; color: #eee; }
 #app { display: grid; grid-template-rows: 40px 1fr; height: 100vh; }
 .topbar { background: #1f2937; display: flex; align-items: center; padding: 0 12px; gap: 12px; }
+.counter { color: #9ca3af; font-variant-numeric: tabular-nums; }
 .dirty-dot { width: 8px; height: 8px; background: #f59e0b; border-radius: 50%; display: none; }
 .dirty-dot.is-dirty { display: inline-block; }
 .main { display: grid; grid-template-columns: 220px 1fr 200px; gap: 8px; padding: 8px; min-height: 0; }
-.case-list, .tools-panel { background: #1f2937; border-radius: 4px; padding: 8px; overflow: auto; }
+
+.case-panel { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.filter { background: #111827; color: #eee; border: 1px solid #374151; border-radius: 3px; padding: 5px 8px; }
+.filter::placeholder { color: #6b7280; }
+.case-list { background: #1f2937; border-radius: 4px; padding: 8px; overflow: auto; flex: 1; min-height: 0; }
+.tools-panel { background: #1f2937; border-radius: 4px; padding: 8px; overflow: auto; }
+
 .viewports { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .viewport { background: #000; border-radius: 3px; min-height: 200px; position: relative; }
+
 .case-row { padding: 4px 6px; cursor: pointer; border-radius: 3px; }
 .case-row:hover { background: #374151; }
 .case-row.active { background: #3b82f6; }
+.case-row.loading { opacity: 0.6; }
+.case-row.loading::after { content: " …"; }
 .case-row.annotated::before { content: "✔ "; color: #10b981; }
 .case-row:not(.annotated)::before { content: "○ "; color: #6b7280; }
+
+.label-row { padding: 4px 6px; cursor: pointer; border-radius: 3px; display: flex; align-items: center; }
+.label-row:hover { background: #374151; }
+.label-row.active { background: #3b82f6; }
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; }
+
+.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+
+.cheat { color: #9ca3af; font-size: 11px; }
+.cheat-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin-top: 4px; }
+kbd { background: #374151; border: 1px solid #4b5563; border-radius: 3px; padding: 0 4px; font-size: 10px; }
+
 .banner { background: #b45309; color: #fff; padding: 6px 10px; border-radius: 3px; margin: 4px 0; }
 button { background: #374151; color: #eee; border: 1px solid #4b5563; padding: 4px 8px; border-radius: 3px; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: #10b981; border-color: #059669; }
 button.active { background: #3b82f6; border-color: #2563eb; }
